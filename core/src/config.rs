@@ -149,8 +149,7 @@ mod tests {
     fn settings_roundtrip_without_secrets() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("s.toml");
-        let mut s = Settings::default();
-        s.server_url = Some("https://mc.example.com".into());
+        let mut s = Settings { server_url: Some("https://mc.example.com".into()), ..Default::default() };
         s.launchers.prism.push(PathBuf::from("D:/Portable/PineconeMC"));
         s.save_to(&path).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();

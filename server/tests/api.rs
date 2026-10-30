@@ -73,6 +73,10 @@ async fn repeated_auth_failures_are_rate_limited() {
         last = api.http.get(format!("{}/v1/worlds", srv.url)).bearer_auth("mcs_bad").send().await.unwrap().status();
     }
     assert_eq!(last, StatusCode::TOO_MANY_REQUESTS);
+    // Real devices on the same address still get in.
+    let r = api.http.get(format!("{}/v1/whoami", srv.url)).bearer_auth(&srv.tokens[0]).send().await.unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert_eq!(r.headers()["x-content-type-options"], "nosniff");
 }
 
 #[tokio::test]

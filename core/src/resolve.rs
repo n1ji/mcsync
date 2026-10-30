@@ -128,10 +128,11 @@ impl Resolver {
             let resp = self
                 .http
                 .post(format!("{}/v2/version_files", self.modrinth_api))
+                .timeout(API_TIMEOUT)
                 .json(&json!({ "hashes": hashes, "algorithm": "sha512" }))
                 .send()
                 .await?;
-            let map: HashMap<String, MrVersion> = check(resp).await?.json().await?;
+            let map: HashMap<String, MrVersion> = read_json(check(resp).await?, MAX_API_RESPONSE).await?;
             all.extend(map);
         }
         Ok(all)
@@ -144,10 +145,11 @@ impl Resolver {
             let resp = self
                 .http
                 .get(format!("{}/v2/projects", self.modrinth_api))
+                .timeout(API_TIMEOUT)
                 .query(&[("ids", ids_json)])
                 .send()
                 .await?;
-            let projects: Vec<MrProject> = check(resp).await?.json().await?;
+            let projects: Vec<MrProject> = read_json(check(resp).await?, MAX_API_RESPONSE).await?;
             out.extend(projects.into_iter().map(|p| (p.id.clone(), p)));
         }
         Ok(out)
@@ -159,11 +161,12 @@ impl Resolver {
         let resp = self
             .http
             .post(format!("{}/v1/fingerprints/{MINECRAFT_GAME_ID}", self.curseforge_api))
+            .timeout(API_TIMEOUT)
             .header("x-api-key", key)
             .json(&json!({ "fingerprints": fps }))
             .send()
             .await?;
-        let body: CfFingerprintResponse = check(resp).await?.json().await?;
+        let body: CfFingerprintResponse = read_json(check(resp).await?, MAX_API_RESPONSE).await?;
         Ok(body
             .data
             .exact_matches
@@ -173,12 +176,64 @@ impl Resolver {
     }
 }
 
+/// Upper bound for JSON API responses.
+pub const MAX_API_RESPONSE: u64 = 32 * 1024 * 1024;
+const MAX_ERROR_BODY: u64 = 64 * 1024;
+pub const API_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+const MAX_REDIRECTS: usize = 5;
+
+/// Shared client. Redirects are followed only over https, and only to the
+/// original host or an allow-listed download host; reqwest drops the
+/// Authorization header on any cross-host redirect.
 pub fn http_client() -> reqwest::Client {
+    let policy = reqwest::redirect::Policy::custom(|attempt| {
+        if attempt.previous().len() >= MAX_REDIRECTS {
+            return attempt.error("too many redirects");
+        }
+        let url = attempt.url();
+        let same_host = attempt.previous().first().and_then(|u| u.host_str()) == url.host_str();
+        let allowed = url.scheme() == "https"
+            && (same_host || url.host_str().is_some_and(|h| ALLOWED_DOWNLOAD_HOSTS.contains(&h)));
+        if allowed {
+            attempt.follow()
+        } else {
+            attempt.stop()
+        }
+    });
     reqwest::Client::builder()
         .user_agent(USER_AGENT)
         .connect_timeout(std::time::Duration::from_secs(15))
+        .redirect(policy)
         .build()
         .expect("static client config")
+}
+
+/// Read a response body, failing once it exceeds `max` bytes.
+pub async fn read_limited(resp: reqwest::Response, max: u64) -> Result<Vec<u8>> {
+    use futures_util::StreamExt;
+    if resp.content_length().is_some_and(|n| n > max) {
+        return Err(Error::Invalid(format!("response larger than {max} bytes")));
+    }
+    let mut out = Vec::new();
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        if out.len() as u64 + chunk.len() as u64 > max {
+            return Err(Error::Invalid(format!("response larger than {max} bytes")));
+        }
+        out.extend_from_slice(&chunk);
+    }
+    Ok(out)
+}
+
+pub async fn read_json<T: serde::de::DeserializeOwned>(resp: reqwest::Response, max: u64) -> Result<T> {
+    Ok(serde_json::from_slice(&read_limited(resp, max).await?)?)
+}
+
+/// Short, size-capped error body for messages.
+pub async fn error_body(resp: reqwest::Response) -> String {
+    let bytes = read_limited(resp, MAX_ERROR_BODY).await.unwrap_or_default();
+    String::from_utf8_lossy(&bytes).chars().take(500).collect()
 }
 
 async fn check(resp: reqwest::Response) -> Result<reqwest::Response> {
@@ -186,9 +241,7 @@ async fn check(resp: reqwest::Response) -> Result<reqwest::Response> {
         return Ok(resp);
     }
     let status = resp.status().as_u16();
-    let mut body = resp.text().await.unwrap_or_default();
-    body.truncate(500);
-    Err(Error::Server { status, body })
+    Err(Error::Server { status, body: error_body(resp).await })
 }
 
 fn blank_entry(f: &LocalFile) -> PackFile {

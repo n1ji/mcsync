@@ -17,6 +17,21 @@ use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 pub const BACKUP_DIR: &str = ".mcsync-backup";
+/// Download cap when a manifest entry has no size.
+const MAX_UNSIZED_DOWNLOAD: u64 = 512 * 1024 * 1024;
+
+/// Walk a directory that came from the pack repo without following
+/// symlinks, including a symlinked root.
+pub(crate) fn walk_repo_dir(root: &Path) -> impl Iterator<Item = walkdir::DirEntry> {
+    let is_link = std::fs::symlink_metadata(root).map(|m| m.file_type().is_symlink()).unwrap_or(true);
+    let walker = if is_link {
+        tracing::warn!("ignoring symlinked directory {}", root.display());
+        None
+    } else {
+        Some(WalkDir::new(root).follow_links(false).follow_root_links(false))
+    };
+    walker.into_iter().flatten().filter_map(|e| e.ok()).filter(|e| e.file_type().is_file())
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ExportReport {
@@ -229,8 +244,15 @@ pub async fn download_verified(http: &reqwest::Client, file: &PackFile, dest: &P
 }
 
 async fn fetch(http: &reqwest::Client, url: &str, file: &PackFile) -> Result<Vec<u8>> {
-    let resp = http.get(url).send().await?.error_for_status()?;
-    let bytes = resp.bytes().await?.to_vec();
+    let resp = http
+        .get(url)
+        .timeout(std::time::Duration::from_secs(600))
+        .send()
+        .await?
+        .error_for_status()?;
+    // Never buffer more than the manifest says the file is.
+    let cap = if file.file_size == 0 { MAX_UNSIZED_DOWNLOAD } else { file.file_size };
+    let bytes = crate::resolve::read_limited(resp, cap).await?;
     if file.file_size != 0 && bytes.len() as u64 != file.file_size {
         return Err(Error::Invalid(format!("{}: size mismatch from {url}", file.path)));
     }
@@ -281,10 +303,7 @@ pub async fn apply_pack(game_dir: &Path, pack_dir: &Path, http: &reqwest::Client
 
     let mut overrides_written = 0;
     if override_root.is_dir() {
-        for e in WalkDir::new(&override_root).into_iter().filter_map(|e| e.ok()) {
-            if !e.file_type().is_file() {
-                continue;
-            }
+        for e in walk_repo_dir(&override_root) {
             let rel = rel_string(e.path().strip_prefix(&override_root).expect("under overrides"));
             if !scope::is_safe_relative(&rel) {
                 tracing::warn!("ignoring unsafe override path {rel}");
@@ -356,14 +375,9 @@ pub async fn install_pack(
 }
 
 fn copy_tree(src: &Path, dst: &Path) -> Result<()> {
-    for e in WalkDir::new(src).into_iter().filter_map(|e| e.ok()) {
+    for e in walk_repo_dir(src) {
         let rel = e.path().strip_prefix(src).expect("under src");
-        let target = dst.join(rel);
-        if e.file_type().is_dir() {
-            std::fs::create_dir_all(&target).at(&target)?;
-        } else if e.file_type().is_file() {
-            copy_into(e.path(), &target)?;
-        }
+        copy_into(e.path(), &dst.join(rel))?;
     }
     Ok(())
 }
@@ -371,4 +385,35 @@ fn copy_tree(src: &Path, dst: &Path) -> Result<()> {
 /// True if a directory looks like a pack directory.
 pub fn is_pack_dir(dir: &Path) -> bool {
     dir.join(INDEX_FILE).is_file()
+}
+
+/// `worlds.json` in a pack dir lists world folder names that are synced
+/// through the server, so a fresh device knows what to pull.
+pub const WORLDS_FILE: &str = "worlds.json";
+
+pub fn pack_worlds(pack_dir: &Path) -> Vec<String> {
+    std::fs::read_to_string(pack_dir.join(WORLDS_FILE))
+        .ok()
+        .and_then(|t| serde_json::from_str::<Vec<String>>(&t).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|n| crate::launcher::is_safe_component(n))
+        .collect()
+}
+
+/// Add a world name; returns true if the file changed.
+pub fn add_pack_world(pack_dir: &Path, world: &str) -> Result<bool> {
+    if !crate::launcher::is_safe_component(world) {
+        return Err(Error::Invalid(format!("bad world folder name {world:?}")));
+    }
+    let mut names = pack_worlds(pack_dir);
+    if names.iter().any(|n| n == world) {
+        return Ok(false);
+    }
+    names.push(world.to_string());
+    names.sort();
+    std::fs::create_dir_all(pack_dir).at(pack_dir)?;
+    let path = pack_dir.join(WORLDS_FILE);
+    std::fs::write(&path, serde_json::to_string_pretty(&names)? + "\n").at(&path)?;
+    Ok(true)
 }

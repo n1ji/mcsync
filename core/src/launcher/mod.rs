@@ -125,6 +125,24 @@ pub fn detect(overrides: &LauncherOverrides) -> Vec<Box<dyn Launcher>> {
     out
 }
 
+/// True if `name` is a single plain folder name that stays inside whatever
+/// directory it is joined onto: no separators, no drive prefix (`C:x`
+/// joins to `C:x` on Windows), no `.`/`..`, no NUL, no Windows device names.
+pub fn is_safe_component(name: &str) -> bool {
+    if name.is_empty() || name.len() > 255 || name == "." || name == ".." {
+        return false;
+    }
+    if name.contains(['/', '\\', ':', '\0']) {
+        return false;
+    }
+    let stem = name.split('.').next().unwrap_or("").trim_end().to_ascii_uppercase();
+    let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ((stem.starts_with("COM") || stem.starts_with("LPT"))
+            && stem.len() == 4
+            && stem.as_bytes()[3].is_ascii_digit());
+    !reserved
+}
+
 /// Characters not allowed in instance folder names on any OS.
 pub fn safe_folder_name(name: &str) -> String {
     let cleaned: String = name

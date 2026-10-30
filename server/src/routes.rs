@@ -13,6 +13,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
+use tower_http::set_header::SetResponseHeaderLayer;
 
 /// JSON request bodies are tiny; only snapshot uploads get a larger limit.
 const SMALL_BODY_LIMIT: usize = 16 * 1024;
@@ -78,6 +79,11 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/worlds/{id}/heartbeat", post(lock))
         .layer(DefaultBodyLimit::max(SMALL_BODY_LIMIT))
         .merge(snapshot)
+        .layer(SetResponseHeaderLayer::overriding(
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(header::CACHE_CONTROL, HeaderValue::from_static("no-store")))
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .with_state(state)
 }

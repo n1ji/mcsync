@@ -13,6 +13,9 @@ pub const LOCAL_BACKUPS: &str = ".mcsync-backups";
 /// Local backups kept per world.
 pub const KEEP_LOCAL_BACKUPS: usize = 5;
 const SKIP_FILES: &[&str] = &["session.lock"];
+/// Limits when unpacking a downloaded world.
+const MAX_UNPACKED_BYTES: u64 = 64 * 1024 * 1024 * 1024;
+const MAX_ENTRIES: u64 = 2_000_000;
 
 /// Server-side world id: `<pack-slug>__<world-slug>-<hash>`. The hash of the
 /// exact folder name keeps "New World" and "New_World" apart.
@@ -87,8 +90,16 @@ fn unpack_checked(archive: &Path, dest: &Path) -> Result<()> {
     let dec = zstd::Decoder::new(file).at(archive)?;
     let mut tar = tar::Archive::new(dec);
     std::fs::create_dir_all(dest).at(dest)?;
+    let mut total: u64 = 0;
+    let mut count: u64 = 0;
     for entry in tar.entries().at(archive)? {
         let mut entry = entry.at(archive)?;
+        // Guard against decompression bombs filling the disk.
+        total = total.saturating_add(entry.size());
+        count += 1;
+        if total > MAX_UNPACKED_BYTES || count > MAX_ENTRIES {
+            return Err(Error::Invalid("world archive is too large".into()));
+        }
         let kind = entry.header().entry_type();
         if !(kind.is_file() || kind.is_dir()) {
             return Err(Error::Invalid("world archive contains links or special files".into()));
@@ -111,7 +122,7 @@ fn unpack_checked(archive: &Path, dest: &Path) -> Result<()> {
 /// Replace (or create) `saves/<world>` from an archive. Returns the backup
 /// location of the previous copy, if there was one.
 pub fn install_world(archive: &Path, saves_dir: &Path, world: &str) -> Result<Option<PathBuf>> {
-    if world.is_empty() || world.contains(['/', '\\']) || world == "." || world == ".." {
+    if !crate::launcher::is_safe_component(world) {
         return Err(Error::Invalid(format!("bad world folder name {world:?}")));
     }
     std::fs::create_dir_all(saves_dir).at(saves_dir)?;
@@ -221,6 +232,19 @@ mod tests {
         assert!(install_world(&archive, &saves, "World").is_err());
         assert!(!tmp.path().join("evil.tx").exists());
         assert!(install_world(&archive, &saves, "..").is_err());
+    }
+
+    #[test]
+    fn rejects_folder_names_that_escape_saves() {
+        let tmp = tempfile::tempdir().unwrap();
+        let archive = tmp.path().join("w.tar.zst");
+        make_world(&tmp.path().join("src"));
+        pack_world(&tmp.path().join("src"), &archive).unwrap();
+        let saves = tmp.path().join("saves");
+        for bad in ["C:", "C:evil", "a:b", "..", "x/y", "x\\y", "NUL", "com1.txt", ""] {
+            assert!(install_world(&archive, &saves, bad).is_err(), "{bad:?} accepted");
+        }
+        assert!(install_world(&archive, &saves, "New World (2)").is_ok());
     }
 
     #[test]

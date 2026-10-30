@@ -39,8 +39,18 @@ impl PackRepo {
             std::fs::create_dir_all(path).map_err(|e| Error::Io { path: path.into(), source: e })?;
             let mut fo = FetchOptions::new();
             fo.remote_callbacks(callbacks(token.clone()));
-            match git2::build::RepoBuilder::new().fetch_options(fo).clone(url, path) {
-                Ok(r) => r,
+            // Clone without checkout, disable symlinks, then check out, so
+            // a symlink committed by another device lands as a plain file.
+            let mut no_checkout = CheckoutBuilder::new();
+            no_checkout.dry_run();
+            match git2::build::RepoBuilder::new().fetch_options(fo).with_checkout(no_checkout).clone(url, path) {
+                Ok(r) => {
+                    r.config()?.set_bool("core.symlinks", false)?;
+                    if r.head().is_ok() {
+                        r.checkout_head(Some(CheckoutBuilder::default().force()))?;
+                    }
+                    r
+                }
                 // An empty remote can't be cloned; start locally and push later.
                 Err(e) if e.code() == git2::ErrorCode::NotFound || e.message().contains("empty") => {
                     init_repo(path)?
@@ -50,6 +60,7 @@ impl PackRepo {
         } else {
             init_repo(path)?
         };
+        repo.config()?.set_bool("core.symlinks", false)?;
         if repo.head().is_err() {
             // Unborn HEAD (fresh init, empty remote, or a remote whose HEAD
             // names another branch): use `main`, from origin if it exists.
@@ -222,7 +233,8 @@ fn callbacks(token: Option<String>) -> RemoteCallbacks<'static> {
             return Cred::ssh_key_from_agent(username.unwrap_or("git"));
         }
         if allowed.contains(CredentialType::USER_PASS_PLAINTEXT) {
-            if let Some(t) = &token {
+            // Only hand the token to an https remote.
+            if let Some(t) = token.as_ref().filter(|_| url.starts_with("https://")) {
                 if attempts.get() <= 2 {
                     return Cred::userpass_plaintext("x-access-token", t);
                 }

@@ -42,6 +42,13 @@ pub struct WorldRef<'a> {
 }
 
 impl WorldRef<'_> {
+    fn validate(&self) -> Result<()> {
+        if crate::launcher::is_safe_component(self.world) {
+            Ok(())
+        } else {
+            Err(Error::Invalid(format!("bad world folder name {:?}", self.world)))
+        }
+    }
     fn saves(&self) -> PathBuf {
         self.game_dir.join("saves")
     }
@@ -90,6 +97,7 @@ pub async fn pull_world(
     w: &WorldRef<'_>,
     resolution: Option<Resolution>,
 ) -> Result<Outcome> {
+    w.validate()?;
     let Some(info) = client.world(&w.id).await? else {
         return Ok(Outcome::NothingOnServer);
     };
@@ -131,6 +139,7 @@ pub async fn push_world(
     w: &WorldRef<'_>,
     resolution: Option<Resolution>,
 ) -> Result<Outcome> {
+    w.validate()?;
     if !w.dir().join("level.dat").is_file() {
         return Ok(Outcome::NoLocalWorld);
     }

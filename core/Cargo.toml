@@ -24,7 +24,7 @@ zstd.workspace = true
 futures-util.workspace = true
 toml = "0.8"
 walkdir = "2"
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 git2 = { version = "0.20", features = ["vendored-libgit2"] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 directories = "6"

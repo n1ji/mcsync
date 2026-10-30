@@ -172,12 +172,12 @@ impl Launcher for CurseForge {
                 Err(e) => tracing::warn!("skipping {}: {e}", path.display()),
             }
         }
-        out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        out.sort_by_key(|a| a.name.to_lowercase());
         Ok(out)
     }
 
     fn read_instance(&self, id: &str) -> Result<Instance> {
-        if id.contains(['/', '\\']) || id == ".." {
+        if !super::is_safe_component(id) {
             return Err(Error::Invalid(format!("bad instance id {id}")));
         }
         let dir = self.instances_dir.join(id);
@@ -226,10 +226,7 @@ impl Launcher for CurseForge {
 
         let overrides = spec.pack_dir.join(OVERRIDES_DIR);
         if overrides.is_dir() {
-            for entry in walkdir::WalkDir::new(&overrides).into_iter().filter_map(|e| e.ok()) {
-                if !entry.file_type().is_file() {
-                    continue;
-                }
+            for entry in crate::pack::walk_repo_dir(&overrides) {
                 let rel = entry.path().strip_prefix(spec.pack_dir).expect("under pack dir");
                 zip.start_file(rel.to_string_lossy().replace('\\', "/"), opts)?;
                 zip.write_all(&std::fs::read(entry.path()).at(entry.path())?).at(&out)?;

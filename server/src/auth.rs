@@ -78,9 +78,10 @@ impl FromRequestParts<Arc<AppState>> for Device {
 
     async fn from_request_parts(parts: &mut Parts, state: &Arc<AppState>) -> Result<Self, Self::Rejection> {
         let key = client_key(parts, state);
-        if state.limiter.blocked(&key) {
-            return Err(ApiError::new(axum::http::StatusCode::TOO_MANY_REQUESTS, "too_many_failures"));
-        }
+        // A valid token always gets through, so failures from a shared
+        // address (everyone behind cloudflared) can't lock real devices out;
+        // the limiter only throttles bad tokens.
+        let too_many = || ApiError::new(axum::http::StatusCode::TOO_MANY_REQUESTS, "too_many_failures");
         let token = parts
             .headers
             .get(axum::http::header::AUTHORIZATION)
@@ -89,9 +90,20 @@ impl FromRequestParts<Arc<AppState>> for Device {
             .map(str::trim)
             .filter(|t| t.starts_with(TOKEN_PREFIX) && t.len() < 100);
         let Some(token) = token else {
+            if state.limiter.blocked(&key) {
+                return Err(too_many());
+            }
             state.limiter.fail(&key);
             return Err(ApiError::unauthorized());
         };
+        if state.limiter.blocked(&key) {
+            // Skip the DB for blocked clients unless the token is valid.
+            return match state.db.device_for_token(&hash_token(token)) {
+                Ok(Some(name)) => Ok(Device { name }),
+                Ok(None) => Err(too_many()),
+                Err(e) => Err(ApiError::internal(e)),
+            };
+        }
         match state.db.device_for_token(&hash_token(token)) {
             Ok(Some(name)) => Ok(Device { name }),
             Ok(None) => {

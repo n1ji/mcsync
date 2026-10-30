@@ -1,6 +1,7 @@
 //! HTTP client for the mcsync world server.
 
 use crate::error::{Error, IoContext, Result};
+use crate::resolve::{read_json, API_TIMEOUT, MAX_API_RESPONSE};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -28,6 +29,9 @@ pub struct WorldInfo {
 pub struct PushResponse {
     pub version: u64,
 }
+
+/// Largest world snapshot the client will download.
+pub const MAX_WORLD_DOWNLOAD: u64 = 16 * 1024 * 1024 * 1024;
 
 pub struct SyncClient {
     http: reqwest::Client,
@@ -67,7 +71,7 @@ impl SyncClient {
         if status.is_success() {
             return Ok(resp);
         }
-        let body = resp.text().await.unwrap_or_default();
+        let body = crate::resolve::error_body(resp).await;
         #[derive(Deserialize)]
         struct ErrBody {
             error: String,
@@ -84,11 +88,11 @@ impl SyncClient {
                 _ => {}
             }
         }
-        Err(Error::Server { status: status.as_u16(), body: body.chars().take(500).collect() })
+        Err(Error::Server { status: status.as_u16(), body })
     }
 
     pub async fn health(&self) -> Result<()> {
-        Self::check(self.http.get(self.url("health")).send().await?).await?;
+        Self::check(self.http.get(self.url("health")).timeout(API_TIMEOUT).send().await?).await?;
         Ok(())
     }
 
@@ -97,36 +101,36 @@ impl SyncClient {
         struct Me {
             device: String,
         }
-        let resp = self.http.get(self.url("v1/whoami")).bearer_auth(&self.token).send().await?;
-        Ok(Self::check(resp).await?.json::<Me>().await?.device)
+        let resp = self.http.get(self.url("v1/whoami")).bearer_auth(&self.token).timeout(API_TIMEOUT).send().await?;
+        Ok(read_json::<Me>(Self::check(resp).await?, MAX_API_RESPONSE).await?.device)
     }
 
     pub async fn list_worlds(&self) -> Result<Vec<WorldInfo>> {
-        let resp = self.http.get(self.url("v1/worlds")).bearer_auth(&self.token).send().await?;
-        Ok(Self::check(resp).await?.json().await?)
+        let resp = self.http.get(self.url("v1/worlds")).bearer_auth(&self.token).timeout(API_TIMEOUT).send().await?;
+        read_json(Self::check(resp).await?, MAX_API_RESPONSE).await
     }
 
     /// World metadata, or None if the server has never seen it.
     pub async fn world(&self, id: &str) -> Result<Option<WorldInfo>> {
-        let resp = self.http.get(self.world_url(id, "")).bearer_auth(&self.token).send().await?;
+        let resp = self.http.get(self.world_url(id, "")).bearer_auth(&self.token).timeout(API_TIMEOUT).send().await?;
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
             return Ok(None);
         }
-        Ok(Some(Self::check(resp).await?.json().await?))
+        Ok(Some(read_json(Self::check(resp).await?, MAX_API_RESPONSE).await?))
     }
 
     pub async fn lock(&self, id: &str) -> Result<LockInfo> {
-        let resp = self.http.post(self.world_url(id, "lock")).bearer_auth(&self.token).send().await?;
-        Ok(Self::check(resp).await?.json().await?)
+        let resp = self.http.post(self.world_url(id, "lock")).bearer_auth(&self.token).timeout(API_TIMEOUT).send().await?;
+        read_json(Self::check(resp).await?, MAX_API_RESPONSE).await
     }
 
     pub async fn heartbeat(&self, id: &str) -> Result<LockInfo> {
-        let resp = self.http.post(self.world_url(id, "heartbeat")).bearer_auth(&self.token).send().await?;
-        Ok(Self::check(resp).await?.json().await?)
+        let resp = self.http.post(self.world_url(id, "heartbeat")).bearer_auth(&self.token).timeout(API_TIMEOUT).send().await?;
+        read_json(Self::check(resp).await?, MAX_API_RESPONSE).await
     }
 
     pub async fn unlock(&self, id: &str) -> Result<()> {
-        let resp = self.http.delete(self.world_url(id, "lock")).bearer_auth(&self.token).send().await?;
+        let resp = self.http.delete(self.world_url(id, "lock")).bearer_auth(&self.token).timeout(API_TIMEOUT).send().await?;
         Self::check(resp).await?;
         Ok(())
     }
@@ -154,7 +158,7 @@ impl SyncClient {
             .body(reqwest::Body::wrap_stream(stream))
             .send()
             .await?;
-        Ok(Self::check(resp).await?.json::<PushResponse>().await?.version)
+        Ok(read_json::<PushResponse>(Self::check(resp).await?, MAX_API_RESPONSE).await?.version)
     }
 
     /// Download a snapshot (latest if `version` is None) to `out`.
@@ -170,10 +174,20 @@ impl SyncClient {
             .and_then(|h| h.to_str().ok())
             .and_then(|s| s.parse().ok())
             .ok_or_else(|| Error::Invalid("server did not send x-world-version".into()))?;
+        let declared = resp.content_length().unwrap_or(MAX_WORLD_DOWNLOAD);
+        if declared > MAX_WORLD_DOWNLOAD {
+            return Err(Error::Invalid(format!("world snapshot larger than {MAX_WORLD_DOWNLOAD} bytes")));
+        }
         let mut f = tokio::fs::File::create(out).await.at(out)?;
         let mut stream = resp.bytes_stream();
+        let mut written: u64 = 0;
         while let Some(chunk) = stream.next().await {
-            f.write_all(&chunk?).await.at(out)?;
+            let chunk = chunk?;
+            written += chunk.len() as u64;
+            if written > declared {
+                return Err(Error::Invalid("world snapshot exceeded its declared size".into()));
+            }
+            f.write_all(&chunk).await.at(out)?;
         }
         f.flush().await.at(out)?;
         Ok(v)

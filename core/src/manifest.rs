@@ -300,10 +300,7 @@ pub fn write_mrpack(pack_dir: &Path, out: &Path) -> Result<PathBuf> {
 
     let overrides = pack_dir.join(OVERRIDES_DIR);
     if overrides.is_dir() {
-        for entry in walkdir::WalkDir::new(&overrides).into_iter().filter_map(|e| e.ok()) {
-            if !entry.file_type().is_file() {
-                continue;
-            }
+        for entry in crate::pack::walk_repo_dir(&overrides) {
             let rel = entry.path().strip_prefix(pack_dir).expect("walk under pack dir");
             let name = rel.to_string_lossy().replace('\\', "/");
             zip.start_file(name, opts)?;

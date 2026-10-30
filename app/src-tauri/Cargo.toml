@@ -1,0 +1,24 @@
+[package]
+name = "mcsync-app"
+description = "mcsync desktop app"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lib]
+name = "mcsync_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+mcsync-core = { path = "../../core" }
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

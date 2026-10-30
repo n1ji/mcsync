@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>mcsync</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand"><span class="logo"></span>mcsync</div>
+      <div class="topbar-actions">
+        <button id="btn-refresh" class="ghost">Refresh</button>
+        <button id="btn-sync-repo" class="ghost">Sync pack repo</button>
+        <button id="btn-settings" class="ghost">Settings</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <aside class="sidebar">
+        <input id="filter" type="search" placeholder="Filter instances" />
+        <div id="instance-list" class="instance-list"></div>
+      </aside>
+
+      <section class="content">
+        <div id="sessions"></div>
+        <div id="detail" class="detail empty">
+          <p>Select an instance.</p>
+        </div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" hidden></div>
+
+    <dialog id="dlg-settings">
+      <form method="dialog" id="settings-form">
+        <h2>Settings</h2>
+        <fieldset>
+          <legend>World server</legend>
+          <label>Server URL <input name="server_url" type="url" placeholder="https://mcsync.example.com" /></label>
+          <label>Device token <span class="secret-state" data-secret="device-token"></span>
+            <input name="device-token" type="password" autocomplete="off" placeholder="leave empty to keep" /></label>
+          <button type="button" id="btn-test" class="ghost">Test connection</button>
+        </fieldset>
+        <fieldset>
+          <legend>Pack repo (git)</legend>
+          <label>Repo URL <input name="git_repo_url" type="text" placeholder="git@github.com:you/mc-packs.git" /></label>
+          <label>Local checkout <input name="repo_dir" type="text" /></label>
+          <label>Git token (HTTPS only) <span class="secret-state" data-secret="git-token"></span>
+            <input name="git-token" type="password" autocomplete="off" placeholder="leave empty to keep" /></label>
+        </fieldset>
+        <fieldset>
+          <legend>Mod resolution</legend>
+          <label>CurseForge API key <span class="secret-state" data-secret="curseforge-api-key"></span>
+            <input name="curseforge-api-key" type="password" autocomplete="off" placeholder="leave empty to keep" /></label>
+        </fieldset>
+        <fieldset>
+          <legend>Launcher paths (optional overrides)</legend>
+          <label>Prism-format data dirs (PineconeMC, portable Prism), one per line
+            <textarea name="prism_dirs" rows="2"></textarea></label>
+          <label>Modrinth App data dir <input name="modrinth_dir" type="text" /></label>
+          <label>CurseForge Instances dir <input name="curseforge_dir" type="text" /></label>
+          <label>Export folder <input name="export_dir" type="text" /></label>
+        </fieldset>
+        <label class="check"><input name="auto_mode" type="checkbox" /> Auto mode: lock and push worlds automatically when a linked instance runs</label>
+        <p class="hint">Secrets are stored in the OS keychain, never in the settings file.</p>
+        <div class="dialog-actions">
+          <button value="cancel" class="ghost" formnovalidate>Cancel</button>
+          <button id="btn-save-settings" value="save" class="primary">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="dlg-conflict">
+      <h2>World conflict</h2>
+      <p id="conflict-text"></p>
+      <div class="dialog-actions stacked">
+        <button data-choice="keep_server" class="ghost">Keep server copy <small>your local copy is backed up</small></button>
+        <button data-choice="keep_local" class="ghost">Keep local copy <small>the server copy is backed up</small></button>
+        <button data-choice="cancel" class="ghost">Cancel</button>
+      </div>
+    </dialog>
+
+    <dialog id="dlg-move">
+      <form method="dialog" id="move-form">
+        <h2>Move pack to launcher</h2>
+        <label>Target launcher <select name="target"></select></label>
+        <label>Instance name <input name="name" type="text" /></label>
+        <p class="hint">Prism-format launchers get a ready instance. Modrinth App and CurseForge get an import file.</p>
+        <div class="dialog-actions">
+          <button value="cancel" class="ghost" formnovalidate>Cancel</button>
+          <button value="go" class="primary">Create</button>
+        </div>
+      </form>
+    </dialog>
+  </body>
+</html>

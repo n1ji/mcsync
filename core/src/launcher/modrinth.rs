@@ -208,12 +208,12 @@ impl Launcher for ModrinthApp {
             }
             out.push(self.build(&folder, meta));
         }
-        out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        out.sort_by_key(|a| a.name.to_lowercase());
         Ok(out)
     }
 
     fn read_instance(&self, id: &str) -> Result<Instance> {
-        if id.contains(['/', '\\']) || id == ".." {
+        if !super::is_safe_component(id) {
             return Err(Error::Invalid(format!("bad instance id {id}")));
         }
         if !self.profiles_dir().join(id).is_dir() {
