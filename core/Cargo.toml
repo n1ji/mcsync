@@ -1,0 +1,35 @@
+[package]
+name = "mcsync-core"
+description = "Launcher-neutral Minecraft pack and world sync library"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+sha1.workspace = true
+sha2.workspace = true
+hex.workspace = true
+tempfile.workspace = true
+tracing.workspace = true
+rusqlite.workspace = true
+tar.workspace = true
+zstd.workspace = true
+futures-util.workspace = true
+toml = "0.8"
+walkdir = "2"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+git2 = { version = "0.20", features = ["vendored-libgit2"] }
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+directories = "6"
+sysinfo = "0.33"
+url = "2"
+
+[dev-dependencies]
+pretty_assertions = "1"

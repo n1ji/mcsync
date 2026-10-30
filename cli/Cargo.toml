@@ -1,0 +1,19 @@
+[package]
+name = "mcsync-cli"
+description = "mcsync command line"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "mcsync"
+path = "src/main.rs"
+
+[dependencies]
+mcsync-core = { path = "../core" }
+anyhow.workspace = true
+clap.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+tracing-subscriber.workspace = true

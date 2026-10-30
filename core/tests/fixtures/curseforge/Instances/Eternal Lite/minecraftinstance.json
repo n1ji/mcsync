@@ -1,0 +1,11 @@
+{
+  "baseModLoader": {"forgeVersion": "43.3.5", "name": "forge-43.3.5", "type": 1, "minecraftVersion": "1.19.2"},
+  "name": "Eternal Lite",
+  "gameVersion": "1.19.2",
+  "guid": "47fc343e-d6ea-4258-8a7c-aa7150ccb924",
+  "installedAddons": [
+    {"addonID": 414401, "name": "Creatures and Beasts", "fileNameOnDisk": "CNB-1.19-1.5.4.jar",
+     "installedFile": {"id": 4556106, "fileName": "CNB-1.19-1.5.4.jar", "fileNameOnDisk": "CNB-1.19-1.5.4.jar",
+       "fileLength": 7, "packageFingerprint": 3675948766, "downloadUrl": null}}
+  ]
+}

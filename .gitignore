@@ -1,0 +1,32 @@
+# Build output
+/target/
+/app/dist/
+/app/node_modules/
+/app/src-tauri/gen/schemas/
+
+# Secrets: never commit tokens, API keys or env files
+.env
+.env.*
+!.env.example
+*.token
+*.key
+*.pem
+secrets/
+device-token*
+curseforge-api-key*
+
+# Server runtime data (snapshots, token DB)
+/data/
+/server/data/
+*.db
+*.db-shm
+*.db-wal
+
+# Local test copies of real launcher instances
+/scratch/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
