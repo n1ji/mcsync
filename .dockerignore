@@ -1,0 +1,7 @@
+target/
+app/node_modules/
+app/dist/
+data/
+.env
+.env.*
+.git/

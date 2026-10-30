@@ -1,0 +1,34 @@
+[package]
+name = "mcsync-server"
+description = "Self-hosted world snapshot and lock server for mcsync"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "mcsync-server"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+rusqlite.workspace = true
+sha2.workspace = true
+hex.workspace = true
+rand.workspace = true
+base64.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+futures-util.workspace = true
+axum = "0.8"
+tower-http = { version = "0.6", features = ["trace", "limit"] }
+tokio-util = { version = "0.7", features = ["io"] }
+
+[dev-dependencies]
+reqwest.workspace = true
+tempfile.workspace = true
+mcsync-core = { path = "../core" }

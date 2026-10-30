@@ -1,0 +1,51 @@
+# mcsync world server.
+#
+#   docker compose up -d --build
+#   docker compose exec mcsync mcsync-server issue-token --device laptop
+#
+# Exposure: the port is bound to localhost only. Reach it from outside through
+# a Cloudflare Tunnel (the `tunnel` profile below, or cloudflared on the host).
+services:
+  mcsync:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    image: mcsync-server:latest
+    restart: unless-stopped
+    environment:
+      MCSYNC_KEEP_SNAPSHOTS: "10"
+      MCSYNC_LOCK_TTL: "90"
+      MCSYNC_MAX_UPLOAD_MB: "4096"
+      # Set to "true" only when the server is reachable solely via Cloudflare.
+      MCSYNC_TRUST_CF_HEADER: "false"
+    volumes:
+      - mcsync-data:/data
+    ports:
+      - "127.0.0.1:8080:8080"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/mcsync-server", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Optional: run the tunnel in compose. Create a tunnel in the Cloudflare
+  # dashboard, point its public hostname at http://mcsync:8080, and put the
+  # token in a .env file next to this one (CF_TUNNEL_TOKEN=...).
+  # Start with: docker compose --profile tunnel up -d
+  cloudflared:
+    profiles: ["tunnel"]
+    image: cloudflare/cloudflared:2026.10.6
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CF_TUNNEL_TOKEN:?set CF_TUNNEL_TOKEN in .env}
+    depends_on:
+      - mcsync
+
+volumes:
+  mcsync-data:
